@@ -14,6 +14,7 @@ from livekit.plugins import (
     openai,
     cartesia,
     deepgram,
+    elevenlabs,
     noise_cancellation,
     silero,
     sarvam,
@@ -34,11 +35,31 @@ import config
 # You can find this by running 'python setup_trunk.py --list' or checking LiveKit Dashboard 
 
 
+def _make_sarvam_tts(language_code: str = None, voice: str = None):
+    """Build a Sarvam TTS tuned for natural, human-sounding Indian speech.
+
+    Single source of truth so the initial voice and every mid-call language
+    switch sound identical.
+    """
+    return sarvam.TTS(
+        model=os.getenv("SARVAM_TTS_MODEL", config.SARVAM_MODEL),
+        speaker=voice or os.getenv("SARVAM_VOICE", "pooja"),
+        target_language_code=language_code or os.getenv("SARVAM_LANGUAGE", config.SARVAM_LANGUAGE),
+        # Naturalness tuning (bulbul:v3):
+        # - temperature: higher = more prosody variation, less monotone (default 0.6)
+        # - pace: 1.0 is natural conversational speed
+        # - enable_preprocessing: speaks numbers, currency and mixed-language text naturally
+        temperature=float(os.getenv("SARVAM_TTS_TEMPERATURE", str(config.SARVAM_TTS_TEMPERATURE))),
+        pace=float(os.getenv("SARVAM_TTS_PACE", str(config.SARVAM_TTS_PACE))),
+        enable_preprocessing=True,
+    )
+
+
 def _build_tts(config_provider: str = None, config_voice: str = None):
     """Configure the Text-to-Speech provider based on env vars or dynamic config."""
     # Priority: Config > Env Var > Default
     provider = (config_provider or os.getenv("TTS_PROVIDER", config.DEFAULT_TTS_PROVIDER)).lower()
-    
+
     # If using a Sarvam voice name, force Sarvam provider
     if config_voice in ["anushka", "aravind", "amartya", "dhruv", "pooja", "rahul"]:
         provider = "sarvam"
@@ -49,13 +70,19 @@ def _build_tts(config_provider: str = None, config_voice: str = None):
         voice = os.getenv("CARTESIA_TTS_VOICE", config.CARTESIA_VOICE)
         return cartesia.TTS(model=model, voice=voice)
     
+    if provider == "elevenlabs":
+        # Top-tier realism. Multilingual models speak whatever language the text
+        # is written in (English/Hindi/Kannada), so no per-language swap needed.
+        logger.info("Using ElevenLabs TTS")
+        return elevenlabs.TTS(
+            voice_id=os.getenv("ELEVEN_VOICE_ID"),  # pick an Indian voice from the voice library
+            model=os.getenv("ELEVEN_MODEL", "eleven_turbo_v2_5"),
+            apply_text_normalization="auto",
+        )
+
     if provider == "sarvam":
         logger.info(f"Using Sarvam TTS (Voice: {config_voice})")
-        model = os.getenv("SARVAM_TTS_MODEL", config.SARVAM_MODEL)
-        # Use dynamic voice or env var or default
-        voice = config_voice or os.getenv("SARVAM_VOICE", "anushka")
-        language = os.getenv("SARVAM_LANGUAGE", config.SARVAM_LANGUAGE)
-        return sarvam.TTS(model=model, speaker=voice, target_language_code=language)
+        return _make_sarvam_tts(voice=config_voice)
 
     if provider == "deepgram":
         logger.info("Using Deepgram TTS")
@@ -125,11 +152,13 @@ class TransferFunctions(llm.ToolContext):
         if not lang_code:
             return "Unrecognized language. Please ask the caller to choose English, Hindi, or Kannada."
 
-        new_tts = sarvam.TTS(
-            model=os.getenv("SARVAM_TTS_MODEL", config.SARVAM_MODEL),
-            speaker=os.getenv("SARVAM_VOICE", "anushka"),
-            target_language_code=lang_code,
-        )
+        # ElevenLabs multilingual voices speak whatever language the text is in -
+        # no TTS swap needed, just reply in the chosen language from now on.
+        if os.getenv("TTS_PROVIDER", config.DEFAULT_TTS_PROVIDER).lower() == "elevenlabs":
+            logger.info(f"Language set to {language} (ElevenLabs multilingual - no TTS swap)")
+            return f"Language switched to {language}. Continue the call in {language}."
+
+        new_tts = _make_sarvam_tts(language_code=lang_code)
 
         if self.agent is not None:
             self.agent.update_options(tts=new_tts)
