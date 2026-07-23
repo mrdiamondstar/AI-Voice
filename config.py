@@ -235,7 +235,9 @@ STT_PROVIDER = "deepgram"
 STT_MODEL = "nova-2"  # Recommended: "nova-2" (balanced) or "nova-3" (newest)
 STT_LANGUAGE = "en"   # "en" supports multi-language code switching in Nova 2
 SARVAM_STT_MODEL = "saarika:v2.5"
-SARVAM_STT_LANGUAGE = "unknown"  # "unknown" = auto-detect (needed until the caller picks a language)
+# Start in explicit en-IN (short words like "yes" transcribe far better than with
+# "unknown" auto-detect); set_language() hot-swaps STT to hi-IN/kn-IN when chosen.
+SARVAM_STT_LANGUAGE = "en-IN"
 
 
 # --- 3. TEXT-TO-SPEECH (TTS) SETTINGS ---

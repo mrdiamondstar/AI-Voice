@@ -89,17 +89,22 @@ def _build_tts(config_provider: str = None, config_voice: str = None):
     return openai.TTS(model=model, voice=voice)
 
 
+def _make_sarvam_stt(language: str = None):
+    """Build a Sarvam STT. Explicit language transcribes short words ('yes', 'haan')
+    far more reliably than 'unknown' auto-detect, so we start in en-IN and hot-swap
+    to the caller's chosen language via set_language()."""
+    model = os.getenv("SARVAM_STT_MODEL", config.SARVAM_STT_MODEL)
+    language = language or os.getenv("SARVAM_STT_LANGUAGE", config.SARVAM_STT_LANGUAGE)
+    logger.info(f"Using Sarvam STT (Language: {language})")
+    return sarvam.STT(model=model, language=language)
+
+
 def _build_stt(config_provider: str = None):
     """Configure the Speech-to-Text provider based on env vars or dynamic config."""
     provider = (config_provider or os.getenv("STT_PROVIDER", config.STT_PROVIDER)).lower()
 
     if provider == "sarvam":
-        model = os.getenv("SARVAM_STT_MODEL", config.SARVAM_STT_MODEL)
-        # Auto-detect language so the caller's initial reply (English/Hindi/Kannada)
-        # transcribes correctly before set_language() locks it to their choice.
-        language = os.getenv("SARVAM_STT_LANGUAGE", config.SARVAM_STT_LANGUAGE)
-        logger.info(f"Using Sarvam STT (Language: {language})")
-        return sarvam.STT(model=model, language=language)
+        return _make_sarvam_stt()
 
     logger.info("Using Deepgram STT")
     return deepgram.STT(model=config.STT_MODEL, language=config.STT_LANGUAGE)
@@ -145,11 +150,14 @@ class TransferFunctions(llm.ToolContext):
         if not lang_code:
             return "Unrecognized language. Please ask the caller to choose English, Hindi, or Kannada."
 
-        new_tts = _make_sarvam_tts(language_code=lang_code)
-
         if self.agent is not None:
-            self.agent.update_options(tts=new_tts)
-            logger.info(f"Switched TTS language to {language} ({lang_code})")
+            # Swap BOTH directions: the voice speaks the new language and the
+            # transcriber listens in it (explicit language = better accuracy).
+            self.agent.update_options(
+                tts=_make_sarvam_tts(language_code=lang_code),
+                stt=_make_sarvam_stt(language=lang_code),
+            )
+            logger.info(f"Switched TTS+STT language to {language} ({lang_code})")
         else:
             logger.warning("set_language called before agent was ready; ignoring")
 
@@ -304,6 +312,21 @@ async def entrypoint(ctx: agents.JobContext):
             close_on_disconnect=True, # Close room when agent disconnects
         ),
     )
+
+    # Silence watchdog: if the caller says nothing for ~15s (or their short reply
+    # was missed by STT), don't sit dead - check in and keep the call moving.
+    @session.on("user_state_changed")
+    def _on_user_state_changed(ev):
+        if ev.new_state == "away":
+            logger.info("Caller quiet for a while - agent checking in")
+            session.generate_reply(
+                instructions=(
+                    "The caller has been quiet, or their short reply may not have been heard. "
+                    "Gently check in in one short sentence - e.g. 'Hello, are you there?' - and "
+                    "if you had just asked them something, repeat it briefly in a fresh way. "
+                    "If they had just agreed to talk, continue to your pitch."
+                )
+            )
 
     # Logic to dial out:
     # 1. If 'phone_number' is present, we MIGHT need to dial.
