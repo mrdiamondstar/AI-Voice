@@ -14,7 +14,6 @@ from livekit.plugins import (
     openai,
     cartesia,
     deepgram,
-    elevenlabs,
     noise_cancellation,
     silero,
     sarvam,
@@ -49,9 +48,13 @@ def _make_sarvam_tts(language_code: str = None, voice: str = None):
         # - temperature: higher = more prosody variation, less monotone (default 0.6)
         # - pace: 1.0 is natural conversational speed
         # - enable_preprocessing: speaks numbers, currency and mixed-language text naturally
+        # - larger buffer/chunks: the engine shapes intonation over whole sentences,
+        #   which sounds smoother and more human than clip-by-clip synthesis
         temperature=float(os.getenv("SARVAM_TTS_TEMPERATURE", str(config.SARVAM_TTS_TEMPERATURE))),
         pace=float(os.getenv("SARVAM_TTS_PACE", str(config.SARVAM_TTS_PACE))),
         enable_preprocessing=True,
+        min_buffer_size=80,
+        max_chunk_length=250,
     )
 
 
@@ -70,16 +73,6 @@ def _build_tts(config_provider: str = None, config_voice: str = None):
         voice = os.getenv("CARTESIA_TTS_VOICE", config.CARTESIA_VOICE)
         return cartesia.TTS(model=model, voice=voice)
     
-    if provider == "elevenlabs":
-        # Top-tier realism. Multilingual models speak whatever language the text
-        # is written in (English/Hindi/Kannada), so no per-language swap needed.
-        logger.info("Using ElevenLabs TTS")
-        return elevenlabs.TTS(
-            voice_id=os.getenv("ELEVEN_VOICE_ID"),  # pick an Indian voice from the voice library
-            model=os.getenv("ELEVEN_MODEL", "eleven_turbo_v2_5"),
-            apply_text_normalization="auto",
-        )
-
     if provider == "sarvam":
         logger.info(f"Using Sarvam TTS (Voice: {config_voice})")
         return _make_sarvam_tts(voice=config_voice)
@@ -151,12 +144,6 @@ class TransferFunctions(llm.ToolContext):
         lang_code = codes.get(language.strip().lower())
         if not lang_code:
             return "Unrecognized language. Please ask the caller to choose English, Hindi, or Kannada."
-
-        # ElevenLabs multilingual voices speak whatever language the text is in -
-        # no TTS swap needed, just reply in the chosen language from now on.
-        if os.getenv("TTS_PROVIDER", config.DEFAULT_TTS_PROVIDER).lower() == "elevenlabs":
-            logger.info(f"Language set to {language} (ElevenLabs multilingual - no TTS swap)")
-            return f"Language switched to {language}. Continue the call in {language}."
 
         new_tts = _make_sarvam_tts(language_code=lang_code)
 
