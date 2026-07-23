@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { roomService, sipClient } from '@/lib/server-utils';
+import { roomService, sipClient, agentDispatchClient } from '@/lib/server-utils';
 
 export async function POST(request: Request) {
     try {
@@ -44,6 +44,13 @@ export async function POST(request: Request) {
                         participantName: "Customer",
                     }
                 );
+
+                // agent.py uses explicit dispatch (agent_name="outbound-caller"), so it
+                // won't join this room on its own - dispatch it explicitly or the call
+                // connects to silence.
+                await agentDispatchClient.createDispatch(roomName, "outbound-caller", {
+                    metadata,
+                });
 
                 results.push({ phoneNumber, status: 'dispatched', id: info.sipCallId });
 

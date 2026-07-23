@@ -17,12 +17,13 @@ export default function CallDispatcher() {
         const form = e.target as HTMLFormElement;
         const modelProvider = (form.elements.namedItem('modelProvider') as HTMLSelectElement).value;
         const voice = (form.elements.namedItem('voice') as HTMLSelectElement).value;
+        const sector = (form.elements.namedItem('sector') as HTMLSelectElement).value;
 
         try {
             const res = await fetch('/api/dispatch', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ phoneNumber, prompt, modelProvider, voice }),
+                body: JSON.stringify({ phoneNumber, prompt, modelProvider, voice, sector }),
             });
 
             const data = await res.json();
@@ -69,11 +70,30 @@ export default function CallDispatcher() {
                     </div>
 
                     <div className="space-y-2">
+                        <label className="text-sm text-gray-400 font-medium">Target sector</label>
+                        <select
+                            className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white outline-none focus:ring-2 focus:ring-blue-500"
+                            name="sector"
+                            defaultValue=""
+                        >
+                            <option value="">Auto (let the agent detect)</option>
+                            <option value="dental">Dental / Clinic</option>
+                            <option value="real_estate">Real Estate</option>
+                            <option value="diagnostics">Diagnostic Lab</option>
+                            <option value="automotive">Automotive Service</option>
+                            <option value="salon">Salon / Spa</option>
+                            <option value="coaching">Coaching / Ed-tech</option>
+                            <option value="insurance">Insurance / Loans</option>
+                            <option value="hospitality">Hotel / Travel</option>
+                        </select>
+                    </div>
+
+                    <div className="space-y-2">
                         <label className="text-sm text-gray-400 font-medium flex items-center gap-2">
-                            <MessageSquare className="w-4 h-4" /> Context / Prompt
+                            <MessageSquare className="w-4 h-4" /> Extra context (optional)
                         </label>
                         <textarea
-                            placeholder="e.g. You are calling regarding a coffee order..."
+                            placeholder="e.g. Bright Smile Dental, Indiranagar Bangalore, ~40 calls/day, owner is Dr. Rao"
                             value={prompt}
                             onChange={(e) => setPrompt(e.target.value)}
                             className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-white placeholder-gray-600 outline-none transition-all duration-300 h-28 resize-none"
@@ -97,13 +117,13 @@ export default function CallDispatcher() {
                             <select
                                 className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white outline-none focus:ring-2 focus:ring-purple-500"
                                 name="voice"
-                                defaultValue="alloy"
+                                defaultValue="pooja"
                             >
-                                <option value="alloy">Alloy (US)</option>
-                                <option value="echo">Echo (US)</option>
-                                <option value="shimmer">Shimmer (US)</option>
-                                <option value="anushka">Anushka (Indian - Sarvam)</option>
-                                <option value="aravind">Aravind (Indian - Sarvam)</option>
+                                <option value="pooja">Pooja (Indian - Sarvam, female)</option>
+                                <option value="rahul">Rahul (Indian - Sarvam, male)</option>
+                                <option value="alloy">Alloy (US - OpenAI)</option>
+                                <option value="echo">Echo (US - OpenAI)</option>
+                                <option value="shimmer">Shimmer (US - OpenAI)</option>
                             </select>
                         </div>
                     </div>

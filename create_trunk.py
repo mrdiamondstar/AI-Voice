@@ -1,9 +1,15 @@
 import asyncio
 import os
+import sys
 import certifi
 
 # Fix SSL on macOS
 os.environ['SSL_CERT_FILE'] = certifi.where()
+
+# Fix for Windows console (cp1252) crashing on emoji output
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
 
 from dotenv import load_dotenv
 from livekit import api

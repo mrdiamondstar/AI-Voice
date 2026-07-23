@@ -39,8 +39,8 @@ def _build_tts(config_provider: str = None, config_voice: str = None):
     # Priority: Config > Env Var > Default
     provider = (config_provider or os.getenv("TTS_PROVIDER", config.DEFAULT_TTS_PROVIDER)).lower()
     
-    # If using Sarvam Voice names (Anushka/Aravind), force Sarvam provider
-    if config_voice in ["anushka", "aravind", "amartya", "dhruv"]:
+    # If using a Sarvam voice name, force Sarvam provider
+    if config_voice in ["anushka", "aravind", "amartya", "dhruv", "pooja", "rahul"]:
         provider = "sarvam"
 
     if provider == "cartesia":
@@ -69,6 +69,22 @@ def _build_tts(config_provider: str = None, config_voice: str = None):
     return openai.TTS(model=model, voice=voice)
 
 
+def _build_stt(config_provider: str = None):
+    """Configure the Speech-to-Text provider based on env vars or dynamic config."""
+    provider = (config_provider or os.getenv("STT_PROVIDER", config.STT_PROVIDER)).lower()
+
+    if provider == "sarvam":
+        model = os.getenv("SARVAM_STT_MODEL", config.SARVAM_STT_MODEL)
+        # Auto-detect language so the caller's initial reply (English/Hindi/Kannada)
+        # transcribes correctly before set_language() locks it to their choice.
+        language = os.getenv("SARVAM_STT_LANGUAGE", config.SARVAM_STT_LANGUAGE)
+        logger.info(f"Using Sarvam STT (Language: {language})")
+        return sarvam.STT(model=model, language=language)
+
+    logger.info("Using Deepgram STT")
+    return deepgram.STT(model=config.STT_MODEL, language=config.STT_LANGUAGE)
+
+
 def _build_llm(config_provider: str = None):
     """Configure the LLM provider based on config or env vars."""
     provider = (config_provider or os.getenv("LLM_PROVIDER", config.DEFAULT_LLM_PROVIDER)).lower()
@@ -93,6 +109,35 @@ class TransferFunctions(llm.ToolContext):
         super().__init__(tools=[])
         self.ctx = ctx
         self.phone_number = phone_number
+        self.agent: Agent | None = None  # Set once the Agent/session are created in entrypoint()
+
+    @llm.function_tool(
+        description="Call this exactly once, right after the caller states which language "
+        "they want to continue in. Switches the voice and transcription to that language."
+    )
+    async def set_language(self, language: str):
+        """
+        Args:
+            language: The language the caller chose - one of "english", "hindi", "kannada".
+        """
+        codes = {"english": "en-IN", "hindi": "hi-IN", "kannada": "kn-IN"}
+        lang_code = codes.get(language.strip().lower())
+        if not lang_code:
+            return "Unrecognized language. Please ask the caller to choose English, Hindi, or Kannada."
+
+        new_tts = sarvam.TTS(
+            model=os.getenv("SARVAM_TTS_MODEL", config.SARVAM_MODEL),
+            speaker=os.getenv("SARVAM_VOICE", "anushka"),
+            target_language_code=lang_code,
+        )
+
+        if self.agent is not None:
+            self.agent.update_options(tts=new_tts)
+            logger.info(f"Switched TTS language to {language} ({lang_code})")
+        else:
+            logger.warning("set_language called before agent was ready; ignoring")
+
+        return f"Language switched to {language}."
 
     @llm.function_tool(description="Look up user details by phone number.")
     async def lookup_user(self, phone: str):
@@ -168,9 +213,9 @@ class OutboundAssistant(Agent):
     An AI agent tailored for outbound calls.
     Attempts to be helpful and concise.
     """
-    def __init__(self, tools: list) -> None:
+    def __init__(self, tools: list, instructions: str = None) -> None:
         super().__init__(
-            instructions=config.SYSTEM_PROMPT,
+            instructions=instructions or config.SYSTEM_PROMPT,
             tools=tools,
         )
 
@@ -217,16 +262,27 @@ async def entrypoint(ctx: agents.JobContext):
 
     # Initialize the Agent Session with plugins
     session = AgentSession(
-        vad=silero.VAD.load(),
-        stt=deepgram.STT(model=config.STT_MODEL, language=config.STT_LANGUAGE), 
+        vad=ctx.proc.userdata["vad"],
+        stt=_build_stt(config_dict.get("stt_provider")),
         llm=_build_llm(config_dict.get("model_provider")),
-        tts=_build_tts(config_dict.get("model_provider"), config_dict.get("voice_id")),
+        tts=_build_tts(config_dict.get("tts_provider"), config_dict.get("voice_id")),
     )
 
     # Start the session
+    # Compose the system prompt from the engine + the target sector's playbook (if provided
+    # via metadata) + any free-text context typed into the dashboard.
+    instructions = config.build_instructions(
+        sector=config_dict.get("sector"),
+        extra_context=config_dict.get("user_prompt"),
+    )
+    agent = OutboundAssistant(
+        tools=list(fnc_ctx.function_tools.values()),
+        instructions=instructions,
+    )
+    fnc_ctx.agent = agent  # lets set_language() hot-swap this agent's TTS mid-call
     await session.start(
         room=ctx.room,
-        agent=OutboundAssistant(tools=list(fnc_ctx.function_tools.values())),
+        agent=agent,
         room_input_options=RoomInputOptions(
             noise_cancellation=noise_cancellation.BVCTelephony(),
             close_on_disconnect=True, # Close room when agent disconnects
@@ -291,11 +347,17 @@ async def entrypoint(ctx: agents.JobContext):
         await session.generate_reply(instructions=config.fallback_greeting)
 
 
+def prewarm(proc: agents.JobProcess):
+    # Load the VAD model once per worker process instead of on every call.
+    proc.userdata["vad"] = silero.VAD.load()
+
+
 if __name__ == "__main__":
     # The agent name "outbound-caller" is used by the dispatch script to find this worker
     agents.cli.run_app(
         agents.WorkerOptions(
             entrypoint_fnc=entrypoint,
-            agent_name="outbound-caller", 
+            prewarm_fnc=prewarm,
+            agent_name="outbound-caller",
         )
     )
