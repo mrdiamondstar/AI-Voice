@@ -280,6 +280,9 @@ DEFAULT_LLM_MODEL = "gpt-4o-mini" # OpenAI default (unused unless DEFAULT_LLM_PR
 GROQ_MODEL = "llama-3.3-70b-versatile"
 GROQ_TEMPERATURE = 0.7
 
+# Google Gemini (set LLM_PROVIDER=gemini + GEMINI_API_KEY in .env to use it)
+GEMINI_MODEL = "gemini-2.0-flash"
+
 
 # --- 5. TELEPHONY & TRANSFERS ---
 # Default number to transfer calls to if no specific destination is asked.

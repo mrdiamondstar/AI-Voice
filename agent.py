@@ -123,6 +123,17 @@ def _build_llm(config_provider: str = None):
     """Configure the LLM provider based on config or env vars."""
     provider = (config_provider or os.getenv("LLM_PROVIDER", config.DEFAULT_LLM_PROVIDER)).lower()
 
+    if provider == "gemini":
+        # Google Gemini via its OpenAI-compatible endpoint. Needs a real AI Studio
+        # key (starts with "AIzaSy...") for free-tier quota.
+        logger.info("Using Google Gemini LLM")
+        return openai.LLM(
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+            api_key=os.getenv("GEMINI_API_KEY"),
+            model=os.getenv("GEMINI_MODEL", config.GEMINI_MODEL),
+            temperature=float(os.getenv("GROQ_TEMPERATURE", str(config.GROQ_TEMPERATURE))),
+        )
+
     if provider == "groq":
         logger.info("Using Groq LLM")
         return openai.LLM(
@@ -131,7 +142,7 @@ def _build_llm(config_provider: str = None):
             model=os.getenv("GROQ_MODEL", config.GROQ_MODEL),
             temperature=float(os.getenv("GROQ_TEMPERATURE", str(config.GROQ_TEMPERATURE))),
         )
-    
+
     # Default to OpenAI
     logger.info("Using OpenAI LLM")
     return openai.LLM(model=config.DEFAULT_LLM_MODEL)
