@@ -131,6 +131,9 @@ set_language tool with their choice and continue the whole call in that language
 
 # The opening the agent delivers the instant the prospect picks up. The system prompt owns the rules;
 # this just triggers the opening turn.
+# Fixed greeting spoken straight to TTS (no LLM) so the first word is instant and warm.
+GREETING_TEXT = "Helloo..."
+
 INITIAL_GREETING = (
     "The prospect just picked up. Say ONLY a soft, warm, gentle 'Helloo...' now - calm and sweet, "
     "slightly drawn out, like a friendly person picking up the phone. Nothing else - do NOT "

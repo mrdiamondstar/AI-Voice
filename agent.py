@@ -94,11 +94,18 @@ def _build_tts(config_provider: str = None, config_voice: str = None):
 def _make_sarvam_stt(language: str = None):
     """Build a Sarvam STT. Explicit language transcribes short words ('yes', 'haan')
     far more reliably than 'unknown' auto-detect, so we start in en-IN and hot-swap
-    to the caller's chosen language via set_language()."""
+    to the caller's chosen language via set_language(). High VAD sensitivity + low
+    speech-frame thresholds so a quick 'hello' reply is actually captured."""
     model = os.getenv("SARVAM_STT_MODEL", config.SARVAM_STT_MODEL)
     language = language or os.getenv("SARVAM_STT_LANGUAGE", config.SARVAM_STT_LANGUAGE)
     logger.info(f"Using Sarvam STT (Language: {language})")
-    return sarvam.STT(model=model, language=language)
+    return sarvam.STT(
+        model=model,
+        language=language,
+        high_vad_sensitivity=True,
+        min_speech_frames=2,
+        first_turn_min_speech_frames=2,
+    )
 
 
 def _build_stt(config_provider: str = None):
@@ -300,6 +307,8 @@ async def entrypoint(ctx: agents.JobContext):
             "endpointing": {"min_delay": 0.2},
             "preemptive_generation": {"enabled": True, "preemptive_tts": True},
         },
+        # If a reply is missed/quiet, recover in ~3s instead of the 15s default.
+        user_away_timeout=3.0,
     )
 
     # Start the session
@@ -323,18 +332,41 @@ async def entrypoint(ctx: agents.JobContext):
         ),
     )
 
-    # Silence watchdog: if the caller says nothing for ~15s (or their short reply
-    # was missed by STT), don't sit dead - check in and keep the call moving.
+    # Fast recovery watchdog. After the "Helloo" greeting, the caller almost always
+    # says hello back - but if STT misses that short word, the agent would sit silent.
+    # So the FIRST time the caller goes quiet (~3s), we push straight into the intro;
+    # after that, any quiet spell just gets a gentle check-in.
+    opening_done = {"v": False}
+
+    # If STT DID catch the caller's reply, the normal pipeline handles the intro -
+    # mark the opening done so the watchdog below doesn't deliver a second intro.
+    @session.on("user_input_transcribed")
+    def _on_user_transcribed(ev):
+        if getattr(ev, "is_final", False) and ev.transcript.strip():
+            opening_done["v"] = True
+
     @session.on("user_state_changed")
     def _on_user_state_changed(ev):
-        if ev.new_state == "away":
-            logger.info("Caller quiet for a while - agent checking in")
+        if ev.new_state != "away":
+            return
+        if not opening_done["v"]:
+            opening_done["v"] = True
+            logger.info("Caller replied (or greeting landed) - delivering intro now")
             session.generate_reply(
                 instructions=(
-                    "The caller has been quiet, or their short reply may not have been heard. "
-                    "Gently check in in one short sentence - e.g. 'Hello, are you there?' - and "
-                    "if you had just asked them something, repeat it briefly in a fresh way. "
-                    "If they had just agreed to talk, continue to your pitch."
+                    "The caller has just greeted you back. RIGHT NOW, with no delay, give your full "
+                    "intro in one breath: your name, that you're from " + config.COMPANY_NAME + ", "
+                    "that you build custom AI calling agents based on their business's requirements, "
+                    "and ask if it's a good time to talk for two minutes. Speak fast and warmly."
+                )
+            )
+        else:
+            logger.info("Caller quiet - gentle check-in")
+            session.generate_reply(
+                instructions=(
+                    "The caller has gone quiet, or a short reply may not have been heard. Gently "
+                    "check in in one short sentence, and briefly repeat your last question in a "
+                    "fresh way. If they had just agreed to talk, continue to your pitch."
                 )
             )
 
@@ -375,25 +407,18 @@ async def entrypoint(ctx: agents.JobContext):
                 )
             )
             logger.info("Call answered! Agent is now listening.")
-            
-            # Note: We do NOT generate an initial reply here immediately.
-            # Usually for outbound, we want to hear "Hello?" from the user first,
-            # OR we can speak immediately. 
-            # If you want the agent to speak first, uncomment the lines below:
-            
-            await session.generate_reply(
-                instructions=config.INITIAL_GREETING
-            )
-            
+            # Speak a fixed greeting via say() - goes straight to TTS, skipping the
+            # LLM entirely, so the first "Helloo" comes out immediately.
+            await session.say(config.GREETING_TEXT, allow_interruptions=True)
+
         except Exception as e:
             logger.error(f"Failed to place outbound call: {e}")
             # Ensure we clean up if the call fails
             ctx.shutdown()
     else:
-        # Fallback for inbound calls (if this agent is used for that) OR Dashboard calls where user is already there
+        # Fallback for inbound calls OR Dashboard calls where the user is already here.
         logger.info("Detecting if we should greet...")
-        # Give a small delay for audio to stabilize if user just joined
-        await session.generate_reply(instructions=config.fallback_greeting)
+        await session.say(config.GREETING_TEXT, allow_interruptions=True)
 
 
 def prewarm(proc: agents.JobProcess):
