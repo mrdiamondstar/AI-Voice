@@ -4,6 +4,7 @@ import certifi
 # Fix for macOS SSL Certificate errors - MUST be before other imports
 os.environ['SSL_CERT_FILE'] = certifi.where()
 
+import asyncio
 import logging
 import json
 from dotenv import load_dotenv
@@ -136,6 +137,16 @@ def _build_llm(config_provider: str = None):
     logger.info("Using OpenAI LLM")
     return openai.LLM(model=config.DEFAULT_LLM_MODEL)
 
+
+
+async def _speak_opening(session: AgentSession):
+    """Scripted opening, straight to TTS (zero LLM latency): a sweet drawn-out hello,
+    a ~0.5s beat (where the caller usually says hello back - we don't wait for or
+    depend on it), then the full intro ending with the language question.
+    Uninterruptible so a 'hello' in the gap can't cancel the intro mid-way."""
+    await session.say(config.GREETING_TEXT, allow_interruptions=False)
+    await asyncio.sleep(0.5)
+    await session.say(config.INTRO_TEXT, allow_interruptions=False)
 
 
 class TransferFunctions(llm.ToolContext):
@@ -304,7 +315,7 @@ async def entrypoint(ctx: agents.JobContext):
         # - preemptive generation + preemptive TTS: prepare the reply (and its audio)
         #   WHILE the caller is finishing, so speech starts near-instantly on their stop
         turn_handling={
-            "endpointing": {"min_delay": 0.2},
+            "endpointing": {"min_delay": 0.15},
             "preemptive_generation": {"enabled": True, "preemptive_tts": True},
         },
         # If a reply is missed/quiet, recover in ~3s instead of the 15s default.
@@ -336,39 +347,21 @@ async def entrypoint(ctx: agents.JobContext):
     # says hello back - but if STT misses that short word, the agent would sit silent.
     # So the FIRST time the caller goes quiet (~3s), we push straight into the intro;
     # after that, any quiet spell just gets a gentle check-in.
-    opening_done = {"v": False}
-
-    # If STT DID catch the caller's reply, the normal pipeline handles the intro -
-    # mark the opening done so the watchdog below doesn't deliver a second intro.
-    @session.on("user_input_transcribed")
-    def _on_user_transcribed(ev):
-        if getattr(ev, "is_final", False) and ev.transcript.strip():
-            opening_done["v"] = True
-
+    # Silence watchdog: the opening is fully scripted, so this only handles quiet
+    # spells - if the caller says nothing (or a reply was missed), check in fast
+    # and repeat the last question instead of sitting silent.
     @session.on("user_state_changed")
     def _on_user_state_changed(ev):
         if ev.new_state != "away":
             return
-        if not opening_done["v"]:
-            opening_done["v"] = True
-            logger.info("Caller replied (or greeting landed) - delivering intro now")
-            session.generate_reply(
-                instructions=(
-                    "The caller has just greeted you back. RIGHT NOW, with no delay, give your full "
-                    "intro in one breath: your name, that you're from " + config.COMPANY_NAME + ", "
-                    "that you build custom AI calling agents based on their business's requirements, "
-                    "and ask if it's a good time to talk for two minutes. Speak fast and warmly."
-                )
+        logger.info("Caller quiet - gentle check-in")
+        session.generate_reply(
+            instructions=(
+                "The caller has gone quiet, or a short reply may not have been heard. Gently "
+                "check in in one short sentence, and briefly repeat your last question in a "
+                "fresh way. If they had just agreed to talk, continue to your pitch."
             )
-        else:
-            logger.info("Caller quiet - gentle check-in")
-            session.generate_reply(
-                instructions=(
-                    "The caller has gone quiet, or a short reply may not have been heard. Gently "
-                    "check in in one short sentence, and briefly repeat your last question in a "
-                    "fresh way. If they had just agreed to talk, continue to your pitch."
-                )
-            )
+        )
 
     # Logic to dial out:
     # 1. If 'phone_number' is present, we MIGHT need to dial.
@@ -407,9 +400,7 @@ async def entrypoint(ctx: agents.JobContext):
                 )
             )
             logger.info("Call answered! Agent is now listening.")
-            # Speak a fixed greeting via say() - goes straight to TTS, skipping the
-            # LLM entirely, so the first "Helloo" comes out immediately.
-            await session.say(config.GREETING_TEXT, allow_interruptions=True)
+            await _speak_opening(session)
 
         except Exception as e:
             logger.error(f"Failed to place outbound call: {e}")
@@ -418,7 +409,7 @@ async def entrypoint(ctx: agents.JobContext):
     else:
         # Fallback for inbound calls OR Dashboard calls where the user is already here.
         logger.info("Detecting if we should greet...")
-        await session.say(config.GREETING_TEXT, allow_interruptions=True)
+        await _speak_opening(session)
 
 
 def prewarm(proc: agents.JobProcess):
