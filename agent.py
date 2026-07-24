@@ -293,11 +293,11 @@ async def entrypoint(ctx: agents.JobContext):
         llm=_build_llm(config_dict.get("model_provider")),
         tts=_build_tts(config_dict.get("tts_provider"), config_dict.get("voice_id")),
         # Snappy, human-like turn-taking:
-        # - endpointing min_delay 0.3s: reply sooner after the caller stops (default 0.5)
+        # - endpointing min_delay 0.2s: reply almost immediately after the caller stops (default 0.5)
         # - preemptive generation + preemptive TTS: prepare the reply (and its audio)
-        #   WHILE the caller is finishing, so speech starts almost instantly on their stop
+        #   WHILE the caller is finishing, so speech starts near-instantly on their stop
         turn_handling={
-            "endpointing": {"min_delay": 0.3},
+            "endpointing": {"min_delay": 0.2},
             "preemptive_generation": {"enabled": True, "preemptive_tts": True},
         },
     )
