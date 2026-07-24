@@ -4,7 +4,6 @@ import certifi
 # Fix for macOS SSL Certificate errors - MUST be before other imports
 os.environ['SSL_CERT_FILE'] = certifi.where()
 
-import asyncio
 import logging
 import json
 from dotenv import load_dotenv
@@ -139,16 +138,6 @@ def _build_llm(config_provider: str = None):
 
 
 
-async def _speak_opening(session: AgentSession):
-    """Scripted opening, straight to TTS (zero LLM latency): a sweet drawn-out hello,
-    a ~0.5s beat (where the caller usually says hello back - we don't wait for or
-    depend on it), then the full intro ending with the language question.
-    Uninterruptible so a 'hello' in the gap can't cancel the intro mid-way."""
-    await session.say(config.GREETING_TEXT, allow_interruptions=False)
-    await asyncio.sleep(0.5)
-    await session.say(config.INTRO_TEXT, allow_interruptions=False)
-
-
 class TransferFunctions(llm.ToolContext):
     def __init__(self, ctx: agents.JobContext, phone_number: str = None):
         super().__init__(tools=[])
@@ -157,18 +146,18 @@ class TransferFunctions(llm.ToolContext):
         self.agent: Agent | None = None  # Set once the Agent/session are created in entrypoint()
 
     @llm.function_tool(
-        description="Call this exactly once, right after the caller states which language "
-        "they want to continue in. Switches the voice and transcription to that language."
+        description="Call this once if the caller replies in, or asks for, Hindi. Switches the "
+        "voice and transcription to Hindi. English is the default and needs no call."
     )
     async def set_language(self, language: str):
         """
         Args:
-            language: The language the caller chose - one of "english", "hindi", "kannada".
+            language: The language the caller chose - one of "english", "hindi".
         """
-        codes = {"english": "en-IN", "hindi": "hi-IN", "kannada": "kn-IN"}
+        codes = {"english": "en-IN", "hindi": "hi-IN"}
         lang_code = codes.get(language.strip().lower())
         if not lang_code:
-            return "Unrecognized language. Please ask the caller to choose English, Hindi, or Kannada."
+            return "Unrecognized language. We support English or Hindi."
 
         if self.agent is not None:
             # Swap BOTH directions: the voice speaks the new language and the
@@ -400,7 +389,9 @@ async def entrypoint(ctx: agents.JobContext):
                 )
             )
             logger.info("Call answered! Agent is now listening.")
-            await _speak_opening(session)
+            # Deliver the whole opening in one turn (hello + intro + time ask) - like
+            # yesterday's version. No mid-opening pause, so no waiting/stall.
+            await session.generate_reply(instructions=config.INITIAL_GREETING)
 
         except Exception as e:
             logger.error(f"Failed to place outbound call: {e}")
@@ -409,7 +400,7 @@ async def entrypoint(ctx: agents.JobContext):
     else:
         # Fallback for inbound calls OR Dashboard calls where the user is already here.
         logger.info("Detecting if we should greet...")
-        await _speak_opening(session)
+        await session.generate_reply(instructions=config.fallback_greeting)
 
 
 def prewarm(proc: agents.JobProcess):

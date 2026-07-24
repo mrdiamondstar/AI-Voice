@@ -47,8 +47,6 @@ Never say their name more than twice in the whole call.
 - In Hindi mode, speak natural Hinglish, NOT pure shuddh Hindi - keep common English words as English
   (appointment, booking, call, business, staff, WhatsApp). "Aapke clinic mein daily kitne calls aate hain?"
   sounds human; a fully Sanskritised sentence sounds like a robot reading news.
-- In Kannada mode, same rule - natural Kannada with everyday English words mixed in, the way people
-  in Bangalore actually speak. Never textbook-formal Kannada.
 - Write ALL numbers as words the way they're SPOKEN: "fifty thousand" / "pachaas hazaar" - never "50,000".
   Say "around three-four lakhs" not "300,000-400,000". Phone digits one by one.
 - Keep sentences SHORT. Long sentences make the voice go flat and robotic. Break thoughts with
@@ -58,19 +56,13 @@ Never say their name more than twice in the whole call.
   your next turn.
 
 # CONVERSATION ARC
-1. OPENING (already spoken for you): the moment the call connected, a fixed opening was already
-   played - a warm hello, your name, that you're from Dee-Starix Techno, that we build custom AI
-   calling agents based on their requirements, and the question of which language they prefer
-   (English, Hindi, or Kannada). So your FIRST job starts at their reply:
-   - The INSTANT they name a language (or clearly reply in one), call set_language with their
-     choice, then in THAT language ask positively: "is this a good time - can we talk for two
-     minutes about how your clinic/institute/business could use one?" (match the word to their
-     sector). Reply fast, no thinking pause.
-   - If their first words are just "hello" or confusion, don't re-introduce everything - one warm
-     line ("Haan hello! This is Ananya from Dee-Starix Techno...") and re-ask the language question
-     briefly.
-   Never say "is this a bad time". Never ask "how are you today?" and never ask "am I speaking to
-   the owner?" - establish that later, naturally.
+1. OPENING (first 15s): start with "Hello," then your name, the company, then this exact positioning
+   in one line: "we build custom AI calling agents based on your business's requirements" - said
+   simply, so they instantly know what this is about. Then ask POSITIVELY for time: "is this a good
+   time? Can we talk for two minutes about how your clinic/institute/business could use one?" (match
+   the word to their sector). Say all of this in one smooth go - do NOT pause after "Hello" to wait
+   for them. Never say "is this a bad time". Never open with "how are you today?" and never ask "am
+   I speaking to the owner?" - establish that later, naturally.
 2. IMPRESS WITH PEER STORIES (the MOMENT they say yes/ok/sure/haan or anything positive):
    do NOT start asking questions. Instead, paint a vivid picture in 3-4 short sentences of how
    OTHER businesses in their exact sector are already using AI calling agents - use the "Peers use
@@ -126,23 +118,25 @@ If they ask whether you're an AI, say so immediately and without embarrassment, 
 Never claim to be human. Never invent a specific real person's identity if challenged.
 
 # LANGUAGE
-The opening already asked which language they prefer. The moment they answer (or reply in any
-language), call the set_language tool with their choice and continue the ENTIRE call in that
-language, mirroring them. Default is English if they never state one.
+Speak English by default. The moment the prospect replies in, or asks for, Hindi, call the
+set_language tool with "hindi" and continue the whole call in natural Hinglish, mirroring them.
+We support English and Hindi only.
 """.strip()
 
 # The opening the agent delivers the instant the prospect picks up. The system prompt owns the rules;
 # this just triggers the opening turn.
-# Fixed opening spoken straight to TTS (no LLM), so it starts instantly and never
-# depends on hearing the caller's first "hello". The agent says the sweet hello,
-# pauses ~half a second, then flows into the full intro + language question.
-GREETING_TEXT = "Hellooo..."
-
-INTRO_TEXT = (
-    "This is Ananya... from Dee-Starix Techno. We build custom AI calling agents for "
-    "businesses, based on your requirements. Before we start... which language would you "
-    "be comfortable talking in - English, Hindi, or Kannada?"
+# The opening the agent delivers the instant the prospect picks up - the whole thing
+# (Hello + name + company + positioning + the "good time, two minutes" ask) in one turn.
+INITIAL_GREETING = (
+    "The prospect just picked up. Deliver your opening now, in English, in one smooth go: "
+    "start with 'Hello,' then your name, the company, then say in one simple line that we build "
+    "custom AI calling agents based on their business's requirements, and ask positively: is this "
+    "a good time, can we talk for two minutes about how their business could use one? Keep it to "
+    "three short sentences. Do not pause after 'Hello'. Do not pitch features yet."
 )
+
+# Same opening when the user is already in the room (dashboard-dispatched) or inbound.
+fallback_greeting = INITIAL_GREETING
 
 
 # --- SECTOR PLAYBOOKS - injected per call so the agent opens with real, specific insight ---
@@ -249,13 +243,13 @@ def build_instructions(sector: str = None, extra_context: str = None) -> str:
 
 
 # --- 2. SPEECH-TO-TEXT (STT) SETTINGS ---
-# "deepgram" (fast, English-focused) or "sarvam" (required for Kannada and other Indian languages)
+# "deepgram" (fast, English-focused) or "sarvam" (Indian English + Hindi)
 STT_PROVIDER = "deepgram"
 STT_MODEL = "nova-2"  # Recommended: "nova-2" (balanced) or "nova-3" (newest)
 STT_LANGUAGE = "en"   # "en" supports multi-language code switching in Nova 2
 SARVAM_STT_MODEL = "saarika:v2.5"
 # Start in explicit en-IN (short words like "yes" transcribe far better than with
-# "unknown" auto-detect); set_language() hot-swaps STT to hi-IN/kn-IN when chosen.
+# "unknown" auto-detect); set_language() hot-swaps STT to hi-IN if the caller wants Hindi.
 SARVAM_STT_LANGUAGE = "en-IN"
 
 
@@ -265,7 +259,7 @@ DEFAULT_TTS_PROVIDER = "deepgram"
 DEFAULT_TTS_VOICE = "pooja"      # OpenAI: alloy, echo, shimmer | Sarvam: pooja, rahul
 
 # Sarvam AI Specifics (for Indian Context)
-# target_language_code / STT language: "en-IN", "hi-IN", "kn-IN" (Kannada), etc.
+# target_language_code / STT language: "en-IN" (English) or "hi-IN" (Hindi)
 SARVAM_MODEL = "bulbul:v3"  # newest, most fluent model; "pooja"/"rahul" are its customer-care voices
 SARVAM_LANGUAGE = "en-IN"
 # Naturalness tuning (bulbul:v3)
