@@ -53,8 +53,10 @@ def _make_sarvam_tts(language_code: str = None, voice: str = None):
         temperature=float(os.getenv("SARVAM_TTS_TEMPERATURE", str(config.SARVAM_TTS_TEMPERATURE))),
         pace=float(os.getenv("SARVAM_TTS_PACE", str(config.SARVAM_TTS_PACE))),
         enable_preprocessing=True,
-        min_buffer_size=80,
-        max_chunk_length=250,
+        # Low buffer = start speaking after ~40 chars instead of waiting for 80,
+        # so the first words come out fast (less dead air after the caller speaks).
+        min_buffer_size=40,
+        max_chunk_length=180,
     )
 
 
@@ -290,6 +292,14 @@ async def entrypoint(ctx: agents.JobContext):
         stt=_build_stt(config_dict.get("stt_provider")),
         llm=_build_llm(config_dict.get("model_provider")),
         tts=_build_tts(config_dict.get("tts_provider"), config_dict.get("voice_id")),
+        # Snappy, human-like turn-taking:
+        # - endpointing min_delay 0.3s: reply sooner after the caller stops (default 0.5)
+        # - preemptive generation + preemptive TTS: prepare the reply (and its audio)
+        #   WHILE the caller is finishing, so speech starts almost instantly on their stop
+        turn_handling={
+            "endpointing": {"min_delay": 0.3},
+            "preemptive_generation": {"enabled": True, "preemptive_tts": True},
+        },
     )
 
     # Start the session
