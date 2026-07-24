@@ -123,6 +123,16 @@ def _build_llm(config_provider: str = None):
     """Configure the LLM provider based on config or env vars."""
     provider = (config_provider or os.getenv("LLM_PROVIDER", config.DEFAULT_LLM_PROVIDER)).lower()
 
+    if provider == "openrouter":
+        # OpenRouter aggregator (OpenAI-compatible). Free models end in ":free".
+        logger.info("Using OpenRouter LLM")
+        return openai.LLM(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=os.getenv("OPENROUTER_API_KEY"),
+            model=os.getenv("OPENROUTER_MODEL", config.OPENROUTER_MODEL),
+            temperature=float(os.getenv("GROQ_TEMPERATURE", str(config.GROQ_TEMPERATURE))),
+        )
+
     if provider == "gemini":
         # Google Gemini via its OpenAI-compatible endpoint. Needs a real AI Studio
         # key (starts with "AIzaSy...") for free-tier quota.

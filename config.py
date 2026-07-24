@@ -283,6 +283,9 @@ GROQ_TEMPERATURE = 0.7
 # Google Gemini (set LLM_PROVIDER=gemini + GEMINI_API_KEY in .env to use it)
 GEMINI_MODEL = "gemini-2.0-flash"
 
+# OpenRouter (set LLM_PROVIDER=openrouter + OPENROUTER_API_KEY in .env to use it)
+OPENROUTER_MODEL = "google/gemma-4-31b-it:free"
+
 
 # --- 5. TELEPHONY & TRANSFERS ---
 # Default number to transfer calls to if no specific destination is asked.
